@@ -29,8 +29,8 @@ function App() {
       setResult(data.rows || []);
       console.log(data);
     } catch (err) {
-      console.error('Error fetching data:', err);
-      setError("Failed to fetch data. Please check your server.");
+      console.error('Error fetching data:', error);
+      setError("Something went wrong. Please be a bit more clear with prompt and try again", error.toString());
     } finally {
       setLoading(false);
     }

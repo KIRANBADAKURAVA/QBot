@@ -6,7 +6,7 @@ const fetchData = async () => {
         const response = await fetch('http://localhost:5000/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: "Find the matches with the highest aggregate score.", reset: true }),
+            body: JSON.stringify({ prompt: "Player with top score in a single match", reset: true }),
         });
         const data = await response.json();
         console.log(data);
