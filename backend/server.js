@@ -10,7 +10,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Convert db.all to promise-based function for cleaner async/await usage
 const runQuery = (sql) => {
   return new Promise((resolve, reject) => {
     db.all(sql, [], (err, rows) => {
@@ -33,7 +32,6 @@ app.post('/api/query', async (req, res) => {
     let cleanSQL = await getCleanSQL(sql);
     
     try {
-      // Try running the query
       const rows = await runQuery(cleanSQL);
       console.log('rows in server.js', rows);
       res.json({ sql: cleanSQL, rows: rows });
@@ -41,11 +39,9 @@ app.post('/api/query', async (req, res) => {
       console.log('SQL Error, attempting to fix:', err);
       
       try {
-        // Try to get a corrected SQL query
         const newQuery = await getCleanSQL(sql, err);
         console.log('New Query:', newQuery);
         
-        // Execute the corrected query
         const rows = await runQuery(newQuery);
         res.json({ sql: newQuery, rows: rows });
       } catch (secondErr) {
