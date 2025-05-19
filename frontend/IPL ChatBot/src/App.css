@@ -1,0 +1,108 @@
+/* Global styling */
+body {
+    margin: 0;
+    padding: 0;
+    background: #f7f9fc;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  
+  .container {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 30px;
+    background: #ffffff;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+  }
+  
+  .title {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 25px;
+    color: #2c3e50;
+  }
+  
+  .form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+  }
+  
+  .form input {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    transition: border 0.3s;
+  }
+  
+  .form input:focus {
+    outline: none;
+    border-color: #0077ff;
+  }
+  
+  .form button {
+    padding: 12px 20px;
+    background: #0077ff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  
+  .form button:hover {
+    background: #005ed3;
+  }
+  
+  .info {
+    text-align: center;
+    color: #555;
+    margin-top: 10px;
+  }
+  
+  .error {
+    text-align: center;
+    color: red;
+    font-weight: bold;
+    margin-top: 10px;
+  }
+  
+  .card {
+    background: #fafafa;
+    border: 1px solid #eee;
+    padding: 20px;
+    border-radius: 10px;
+    margin-top: 20px;
+  }
+  
+  .sql-block pre {
+    background-color: #f0f0f0;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  
+  .table-wrapper table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+  }
+  
+  .table-wrapper th,
+  .table-wrapper td {
+    padding: 12px 10px;
+    border: 1px solid #ddd;
+    text-align: left;
+  }
+  
+  .table-wrapper th {
+    background: #f1f1f1;
+  }
+  
+  .table-wrapper tr:nth-child(even) {
+    background-color: #fbfbfb;
+  }
+  
