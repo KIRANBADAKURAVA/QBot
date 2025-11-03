@@ -1,8 +1,9 @@
-import express from 'express';
-import cors from 'cors';
-import db from './db.js';
-import { generateSQL, resetChat, getCleanSQL, resolveError } from './queryllm.js';
+// server.js
+import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
+import db from "./db.js";
+import { generateSQL, resetChat, getCleanSQL, resolveError } from "./queryllm.js";
 
 dotenv.config();
 
@@ -10,6 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Run SQL safely
 const runQuery = (sql) => {
   return new Promise((resolve, reject) => {
     db.all(sql, [], (err, rows) => {
@@ -19,45 +21,33 @@ const runQuery = (sql) => {
   });
 };
 
-app.post('/api/query', async (req, res) => {
+// Chat endpoint (same as Flask `/chat`)
+app.post("/api/query", async (req, res) => {
   const { prompt, reset } = req.body;
 
   if (reset) resetChat();
 
   try {
-    console.log(prompt, reset);
+    console.log("Received prompt:", prompt);
 
-    // Generate initial SQL query
+    // Step 1: Generate SQL
     const sql = await generateSQL(prompt);
     let cleanSQL = await getCleanSQL(sql);
-    
+
     try {
       const rows = await runQuery(cleanSQL);
-      console.log('rows in server.js', rows);
-      res.json({ sql: cleanSQL, rows: rows });
+      return res.json({ sql: cleanSQL, rows });
     } catch (err) {
-      console.log('SQL Error, attempting to fix:', err);
-      
-      try {
-        const newQuery = await getCleanSQL(sql, err);
-        console.log('New Query:', newQuery);
-        
-        const rows = await runQuery(newQuery);
-        res.json({ sql: newQuery, rows: rows });
-      } catch (secondErr) {
-        console.log('Failed with second query attempt:', secondErr);
-        res.status(400).json({ 
-          error: 'SQL Error', 
-          message: secondErr.message,
-          originalSql: cleanSQL 
-        });
-      }
+      console.log("SQL error:", err.message);
+      const fixedSQL = await resolveError(cleanSQL, err.message);
+      const rows = await runQuery(fixedSQL);
+      res.json({ sql: fixedSQL, rows });
     }
   } catch (err) {
-    console.error('Failed to process prompt:', err);
-    res.status(500).json({ 
-      error: 'Failed to process prompt.', 
-      message: err.message 
+    console.error("Processing error:", err);
+    res.status(500).json({
+      error: "Failed to process query",
+      message: err.message,
     });
   }
 });

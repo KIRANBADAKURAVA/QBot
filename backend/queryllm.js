@@ -1,167 +1,133 @@
-import Groq from "groq-sdk";
+// queryllm.js
 import dotenv from "dotenv";
-import db from './db.js';
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { createSqlAgent } from "langchain/agents/sql";
+import { SQLDatabase } from "langchain/sql_db";
+import { createRetrieverTool } from "langchain/agents/toolkits";
+import { FAISS } from "langchain/vectorstores/faiss";
+import { SemanticSimilarityExampleSelector } from "langchain/example_selectors";
+import { ChatPromptTemplate, FewShotPromptTemplate, PromptTemplate, SystemMessagePromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
 
 
 dotenv.config();
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// database
+const sqlDB = await SQLDatabase.fromUri("sqlite:///database.sqlite");
+
+//  LLM
+const llm = new ChatOpenAI({
+  apiKey: OPENAI_API_KEY,
+  model: "gpt-3.5-turbo",
+  temperature: 0,
 });
 
+// retriever 
+const tableInfo = sqlDB.context.table_info;
 
+async function queryAsList(query) {
+  const res = await sqlDB.run(query);
+  const parsed = JSON.parse(res);
+  return [...new Set(parsed.flat().map((v) => v?.toString().trim()))];
+}
 
+// Preload lookup data
+const battingHand = await queryAsList("SELECT Batting_hand FROM Batting_Style");
+const bowlingSkill = await queryAsList("SELECT Bowling_skill FROM Bowling_Style");
+const cityName = await queryAsList("SELECT City_Name FROM City");
+const teamName = await queryAsList("SELECT Team_Name FROM Team");
+const venueName = await queryAsList("SELECT Venue_Name FROM Venue");
+const countryName = await queryAsList("SELECT Country_Name FROM Country");
+const playerName = await queryAsList("SELECT Player_Name FROM Player");
 
+const allTextData = battingHand.concat(bowlingSkill, cityName, teamName, venueName, countryName, playerName);
+const vectorDB = await FAISS.fromTexts(allTextData, new OpenAIEmbeddings({ apiKey: OPENAI_API_KEY }));
+const retriever = vectorDB.asRetriever({ k: 5 });
 
-const IPL_SCHEMA_CONTEXT = `
-You are an expert IPL stats assistant. The IPL SQLite database schema includes the following tables and columns:
+const retrieverTool = createRetrieverTool(retriever, {
+  name: "search_proper_nouns",
+  description: "Use this tool to look up valid proper nouns in the database for filters.",
+});
 
-Match(Match_Id, Team_1, Team_2, Match_Date, Season_Id, Venue_Id, Toss_Winner, Toss_Decide, Win_Type, Win_Margin, Outcome_Id, Match_Winner, Man_Of_The_Match),
-Player(Player_Id, Player_Name, DOB, Bowling_skill,Batting_hand, Country_Name),
-Player_Match(Match_Id, Player_Id, Role_Id, Team_Id),
-Role(Role_Id, Role_Desc),
-Team(Team_Id, Team_Name),
-Ball_by_Ball(Match_Id, Over_Id, Ball_Id, Innings_No, Team_Batting, Team_Bowling, Striker_Batting_Position, Striker, Non_Striker, Bowler),
-Batsman_Scored(Match_Id, Over_Id, Ball_Id, Runs_Scored, Innings_No),
-Wicket_Taken(Match_Id, Over_Id, Ball_Id, Player_Out, Kind_Out, Fielders, Innings_No),
-Out_Type(Out_Id, Out_Name),
-Venue(Venue_Id, Venue_Name, City_Id),
-City(City_Id, City_Name, Country_Id),
-Country(Country_Id, Country_Name),
-Toss_Decision(Toss_Id, Toss_Name),
-Outcome(Outcome_Id, Outcome_Type),
-Umpire(Umpire_Id, Umpire_Name, Umpire_Country),
-Season(Season_Id, Season_Year),
-Batting_Style(Batting_Id, Batting_hand),
-Bowling_Style(Bowling_Id, Bowling_skill),
-Win_By(Win_Id, Win_Type),
-Extra_Type(Extra_Id, Extra_Name),
-Extra_Runs(Match_Id, Over_Id, Ball_Id, Extra_Id, Extra_Runs, Innings_No)
+//examples
+const examples = [
+  {
+    input: "Find the player with the highest average runs per match across multiple seasons.",
+    query: "SELECT Player.Player_Name, AVG(Batsman_Scored.Runs_Scored) as Average_Runs FROM Player INNER JOIN Player_Match ON Player.Player_Id = Player_Match.Player_Id INNER JOIN Batsman_Scored ON Player_Match.Match_Id = Batsman_Scored.Match_Id GROUP BY Player.Player_Name ORDER BY Average_Runs DESC LIMIT 1;",
+  },
+  {
+    input: "List all players who have played in more than three teams.",
+    query: "SELECT Player.Player_Name FROM Player INNER JOIN Player_Match ON Player.Player_Id = Player_Match.Player_Id GROUP BY Player.Player_Name HAVING COUNT(DISTINCT Player_Match.Team_Id) > 3;",
+  },
+  // (You can add more examples if needed)
+];
 
-
-- The table information is given in the following format:
-    Table_Name(Column_1, Column_2, Column_3, ...)
-    use this format to write the query
-
-- for example in Batting_Style(Batting_Id, Batting_hand), Batting_Id is the primary key and Batting_hand is the column name
-
-
-
-
-
-Always generalize and optimize the query to retrieve only what's asked. Always limit the response to 5 unless a number mentioned. If a query cannot be answered with the schema provided, return a SQL comment explaining why (e.g., -- Unable to answer because the table does not include required data).
-Your task is to return only the correct and syntactically valid SQL query based on the user's prompt. Do not return any explanation or text. Only output a single SQL query as plain text.
-
-the expected output is something like this: "SELECT Match_Id FROM Match WHERE Toss_Decide = (SELECT Toss_Id FROM Toss_Decision WHERE Toss_Name = 'Bat') AND Toss_Winner = Match_Winner;"
-    
+const systemPrefix = `
+You are an intelligent SQL assistant for IPL statistics.
+Generate valid, optimized SQL queries based on user questions.
+Use only the following tables:
+${tableInfo}
 `;
 
+const exampleSelector = new SemanticSimilarityExampleSelector({
+  examples,
+  embeddings: new OpenAIEmbeddings({ apiKey: OPENAI_API_KEY }),
+  vectorStoreClass: FAISS,
+  k: 5,
+});
 
+const fewShotPrompt = new FewShotPromptTemplate({
+  exampleSelector,
+  examplePrompt: new PromptTemplate({
+    inputVariables: ["input", "query"],
+    template: "User: {input}\nSQL: {query}",
+  }),
+  inputVariables: ["input", "dialect", "top_k"],
+  prefix: systemPrefix,
+  suffix: "",
+});
 
+const fullPrompt = ChatPromptTemplate.fromMessages([
+  SystemMessagePromptTemplate.fromTemplate(fewShotPrompt),
+  ["human", "{input}"],
+  new MessagesPlaceholder("agent_scratchpad"),
+]);
 
+// agent
+const agent = createSqlAgent({
+  llm,
+  db: sqlDB,
+  extraTools: [retrieverTool],
+  prompt: fullPrompt,
+  verbose: true,
+});
 
-
-
-
+//  functions
 let chatHistory = [];
 
 async function generateSQL(userPrompt) {
-   // console.log('in queryllm.js',userPrompt);
   chatHistory.push({ role: "user", content: userPrompt });
-
-  const res = await groq.chat.completions.create({
-    model: "llama3-70b-8192",
-    messages: [
-      { role: "system", content: IPL_SCHEMA_CONTEXT },
-      ...chatHistory,
-    ],
-  });
-
-  const reply = res.choices[0].message.content.trim();
-  //console.log('in regenarting sql',reply);
-  return reply;
+  const result = await agent.invoke({ input: userPrompt });
+  return result.output;
 }
 
-async function getCleanSQL(sql, error) {
-    const reply = await groq.chat.completions.create({
-        model: "llama3-70b-8192",
-        messages: [
-            {
-                role: "system",
-                content: `You are an expert SQL assistant. A user will give you an incorrect or invalid SQL query. Your task is to:
-1. Fix any syntax or logical errors in the query related to: ${error}.
-2. Only use columns and tables from the schema provided below.
-3. Return only the corrected and syntactically valid SQL query. Do not include any explanations, comments, or additional text.
-
-Schema:
-Match(Match_Id, Team_1, Team_2, Match_Date, Season_Id, Venue_Id, Toss_Winner, Toss_Decide, Win_Type, Win_Margin, Outcome_Id, Match_Winner, Man_Of_The_Match),
-Player(Player_Id, Player_Name, DOB, Bowling_skill, Batting_hand, Country_Name),
-Player_Match(Match_Id, Player_Id, Role_Id, Team_Id),
-Role(Role_Id, Role_Desc),
-Team(Team_Id, Team_Name),
-Ball_by_Ball(Match_Id, Over_Id, Ball_Id, Innings_No, Team_Batting, Team_Bowling, Striker_Batting_Position, Striker, Non_Striker, Bowler),
-Batsman_Scored(Match_Id, Over_Id, Ball_Id, Runs_Scored, Innings_No),
-Wicket_Taken(Match_Id, Over_Id, Ball_Id, Player_Out, Kind_Out, Fielders, Innings_No),
-Out_Type(Out_Id, Out_Name),
-Venue(Venue_Id, Venue_Name, City_Id),
-City(City_Id, City_Name, Country_Id),
-Country(Country_Id, Country_Name),
-Toss_Decision(Toss_Id, Toss_Name),
-Outcome(Outcome_Id, Outcome_Type),
-Umpire(Umpire_Id, Umpire_Name, Umpire_Country),
-Season(Season_Id, Season_Year),
-Batting_Style(Batting_Id, Batting_hand),
-Bowling_Style(Bowling_Id, Bowling_skill),
-Win_By(Win_Id, Win_Type),
-Extra_Type(Extra_Id, Extra_Name),
-Extra_Runs(Match_Id, Over_Id, Ball_Id, Extra_Id, Extra_Runs, Innings_No)`
-            },
-            {
-                role: "user",
-                content: sql
-            }
-        ],
-    });
-
-    const cleanSQL = reply.choices[0].message.content.trim();
-    return cleanSQL;
+async function getCleanSQL(sql) {
+  const completion = await llm.invoke(
+    `Fix the following SQL if it contains syntax issues. Return only valid SQL:\n${sql}`
+  );
+  return completion.content.trim();
 }
-
 
 async function resolveError(sql, err) {
-    const reply = await groq.chat.completions.create({
-        model: "llama3-70b-8192",
-        messages: [
-            { role: "system", content: `Rewrite the ${sql}  . Your task is to return only the correct and syntactically valid SQL query and dont return any other text` },
-            { role: "user", content: sql },
-        ],
-    });
-    const cleanSQL= reply.choices[0].message.content.trim();
-   console.log('in getcleanSQL',cleanSQL);
-    return cleanSQL;
+  const completion = await llm.invoke(
+    `Rewrite this SQL to fix the following error: ${err}\nSQL: ${sql}\nReturn only valid SQL.`
+  );
+  return completion.content.trim();
 }
-
-
 
 function resetChat() {
   chatHistory = [];
 }
 
-// const func= async()=>{
-//     const cleanSQL = await generateSQL('Find the matfches with the highest aggregate score.');
-//     const cleanSQL2 = await getcleanSQL(cleanSQL);
-
-// console.log(cleanSQL2  );
-// db.all(cleanSQL2, [], (err, rows) => {
-//     if (err)  {
-//         throw err;
-//     }
-//     else{
-//         console.log(rows);
-//     }
-
-//   });
-
-// }
-//func();
-export { generateSQL, resetChat, getCleanSQL ,resolveError };
+export { generateSQL, resetChat, getCleanSQL, resolveError };
