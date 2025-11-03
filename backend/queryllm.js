@@ -60,7 +60,7 @@ const examples = [
     input: "List all players who have played in more than three teams.",
     query: "SELECT Player.Player_Name FROM Player INNER JOIN Player_Match ON Player.Player_Id = Player_Match.Player_Id GROUP BY Player.Player_Name HAVING COUNT(DISTINCT Player_Match.Team_Id) > 3;",
   },
-  // (You can add more examples if needed)
+  
 ];
 
 const systemPrefix = `
